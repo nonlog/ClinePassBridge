@@ -195,7 +195,11 @@ func (s *Service) readJSON(up upstreamStream) ([]byte, error) {
 	return b.Bytes(), nil
 }
 func (s *Service) newLog(r ExecutorRequest, c Credential, up string) LogEntry {
-	return LogEntry{ID: id(), Time: time.Now().UTC(), Model: r.Model, UpstreamModel: up, Stream: r.Stream, Provider: "unknown", ProviderSource: "not_reported", Credential: c.Label, Attempts: []Attempt{}}
+	return LogEntry{
+		ID: id(), Time: time.Now().UTC(), Model: r.Model, UpstreamModel: up, Stream: r.Stream,
+		Provider: "unknown", ProviderSource: "not_reported", Credential: c.Label, Attempts: []Attempt{},
+		RequestPath: str(r.Metadata["request_path"]), SourceFormat: r.SourceFormat, OutputFormat: r.Format,
+	}
 }
 func (s *Service) execute(r ExecutorRequest) (any, error) {
 	if err := s.begin(); err != nil {
@@ -377,7 +381,15 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 			if str(r.Metadata["request_path"]) == "/v1/messages" {
 				b = append(append([]byte("data: "), b...), []byte("\n\n")...)
 			}
-			if e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": b}, nil); e != nil {
+			emitStarted := time.Now()
+			e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": b}, nil)
+			emitWait := time.Since(emitStarted).Milliseconds()
+			entry.EmitCalls++
+			entry.EmitWaitMS += emitWait
+			if emitWait > entry.EmitWaitMaxMS {
+				entry.EmitWaitMaxMS = emitWait
+			}
+			if e != nil {
 				return fail(499, "client disconnected")
 			}
 			return nil

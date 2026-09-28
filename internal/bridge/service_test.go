@@ -31,6 +31,7 @@ type fakeHost struct {
 	upstreamClosed []string
 	emitted        [][]byte
 	emitFailAt     int
+	emitDelay      time.Duration
 	clientError    string
 	clientClosed   chan struct{}
 	closeOnce      sync.Once
@@ -92,6 +93,9 @@ func (h *fakeHost) call(method string, payload, out any) error {
 		chunk, ok := request["payload"].([]byte)
 		if !ok {
 			return errors.New("emitted payload was not bytes")
+		}
+		if h.emitDelay > 0 {
+			time.Sleep(h.emitDelay)
 		}
 		if h.emitFailAt > 0 && len(h.emitted)+1 >= h.emitFailAt {
 			return errors.New("client connection closed")
@@ -409,6 +413,39 @@ func TestNativeEmptyResponseFallsBackOnceAndLogsBothAttempts(t *testing.T) {
 	}
 	if s.logs[0].Provider != "unknown" || len(h.upstreamClosed) != 2 {
 		t.Fatalf("fallback provider/stream close = %q / %#v", s.logs[0].Provider, h.upstreamClosed)
+	}
+}
+
+func TestStreamingLogsSafeProtocolAndEmitBackpressureMetrics(t *testing.T) {
+	s := registeredService(t, "native-fallback")
+	h := newFakeHost(ssePlan(simpleSSE()))
+	h.emitDelay = 15 * time.Millisecond
+	s.SetHost(h.call)
+
+	var req ExecutorRequest
+	if err := json.Unmarshal(executorRequest("client-metrics"), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	req.SourceFormat = "chat-completions"
+	req.Format = "chat-completions"
+	req.Metadata = map[string]any{"request_path": "/v1/messages"}
+	if _, err := s.Handle("executor.execute_stream", jsonBytes(req)); err != nil {
+		t.Fatalf("start executor stream: %v", err)
+	}
+	select {
+	case <-h.clientClosed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("plugin did not close client stream")
+	}
+	if len(s.logs) != 1 {
+		t.Fatalf("logs = %d, want 1", len(s.logs))
+	}
+	log := s.logs[0]
+	if log.RequestPath != "/v1/messages" || log.SourceFormat != "chat-completions" || log.OutputFormat != "chat-completions" {
+		t.Fatalf("protocol metadata = path:%q source:%q output:%q", log.RequestPath, log.SourceFormat, log.OutputFormat)
+	}
+	if log.EmitCalls < 2 || log.EmitWaitMS < log.EmitCalls*10 || log.EmitWaitMaxMS < 10 {
+		t.Fatalf("emit metrics = calls:%d wait:%d max:%d", log.EmitCalls, log.EmitWaitMS, log.EmitWaitMaxMS)
 	}
 }
 

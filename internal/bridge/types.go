@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.7"
+const Version = "0.1.8"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -147,6 +147,12 @@ type LogEntry struct {
 	CachedTokens     int64     `json:"cached_tokens"`
 	ReasoningTokens  int64     `json:"reasoning_tokens"`
 	Credential       string    `json:"credential"`
+	RequestPath      string    `json:"request_path,omitempty"`
+	SourceFormat     string    `json:"source_format,omitempty"`
+	OutputFormat     string    `json:"output_format,omitempty"`
+	EmitCalls        int64     `json:"emit_calls,omitempty"`
+	EmitWaitMS       int64     `json:"emit_wait_ms,omitempty"`
+	EmitWaitMaxMS    int64     `json:"emit_wait_max_ms,omitempty"`
 	Attempts         []Attempt `json:"attempts"`
 	Error            string    `json:"error,omitempty"`
 }
