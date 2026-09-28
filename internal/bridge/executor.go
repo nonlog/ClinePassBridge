@@ -374,17 +374,24 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 			s.appendLog(entry)
 			_ = s.call("host.stream.close", map[string]any{"stream_id": r.StreamID, "error": safeError(err)}, nil)
 		}()
-		_, err = s.consumeSSE(us, r.Model, &entry, &attempt, start, func(b []byte) error {
-			// CPA v7.3.12 passes native Chat Completions through as raw JSON,
-			// but its OpenAI-to-Claude translator requires SSE input. The host
-			// rewrites Format/SourceFormat; request_path preserves the HTTP route.
-			if str(r.Metadata["request_path"]) == "/v1/messages" {
-				b = append(append([]byte("data: "), b...), []byte("\n\n")...)
-			}
+		isClaude := str(r.Metadata["request_path"]) == "/v1/messages"
+		const (
+			claudeBatchFrames = 32
+			claudeBatchBytes  = 64 << 10
+			claudeBatchDelay  = 40 * time.Millisecond
+		)
+		var claudeBatch []byte
+		batchFrames := 0
+		lastBatchFlush := time.Now()
+		emitDownstream := func(payload []byte, frames int) error {
 			emitStarted := time.Now()
-			e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": b}, nil)
+			e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": payload}, nil)
 			emitWait := time.Since(emitStarted).Milliseconds()
 			entry.EmitCalls++
+			entry.StreamFrames += int64(frames)
+			if int64(frames) > entry.EmitBatchMax {
+				entry.EmitBatchMax = int64(frames)
+			}
 			entry.EmitWaitMS += emitWait
 			if emitWait > entry.EmitWaitMaxMS {
 				entry.EmitWaitMaxMS = emitWait
@@ -393,7 +400,38 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 				return fail(499, "client disconnected")
 			}
 			return nil
+		}
+		flushClaude := func() error {
+			if len(claudeBatch) == 0 {
+				return nil
+			}
+			e := emitDownstream(claudeBatch, batchFrames)
+			claudeBatch = claudeBatch[:0]
+			batchFrames = 0
+			lastBatchFlush = time.Now()
+			return e
+		}
+		_, err = s.consumeSSE(us, r.Model, &entry, &attempt, start, func(b []byte) error {
+			if !isClaude {
+				return emitDownstream(b, 1)
+			}
+			// Claude output translation accepts ordinary SSE byte streams. Coalesce
+			// several complete Chat Completions frames per host callback so the
+			// CPA stream bridge and translator do not impose per-token backpressure.
+			claudeBatch = append(claudeBatch, "data: "...)
+			claudeBatch = append(claudeBatch, b...)
+				claudeBatch = append(claudeBatch, 10, 10)
+			batchFrames++
+			if entry.EmitCalls == 0 || batchFrames >= claudeBatchFrames || len(claudeBatch) >= claudeBatchBytes || time.Since(lastBatchFlush) >= claudeBatchDelay {
+				return flushClaude()
+			}
+			return nil
 		})
+		if isClaude {
+			if flushErr := flushClaude(); err == nil && flushErr != nil {
+				err = flushErr
+			}
+		}
 	}()
 	return map[string]any{"headers": http.Header{"Content-Type": []string{"text/event-stream"}, "Cache-Control": []string{"no-cache"}}}, nil
 }

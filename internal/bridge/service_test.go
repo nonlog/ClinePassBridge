@@ -449,6 +449,65 @@ func TestStreamingLogsSafeProtocolAndEmitBackpressureMetrics(t *testing.T) {
 	}
 }
 
+func TestClaudeStreamingCoalescesSSEFrames(t *testing.T) {
+	s := registeredService(t, "native-fallback")
+	var stream []byte
+	for i := 0; i < 64; i++ {
+		stream = append(stream, sseFrame(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": "x"}}}})...)
+	}
+	stream = append(stream, sseFrame(map[string]any{
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"}},
+		"usage": map[string]any{"prompt_tokens": 8, "completion_tokens": 64},
+	})...)
+	stream = append(stream, []byte("data: [DONE]\n\n")...)
+	h := newFakeHost(ssePlan(stream))
+	h.emitDelay = 15 * time.Millisecond
+	s.SetHost(h.call)
+
+	var req ExecutorRequest
+	if err := json.Unmarshal(executorRequest("client-batch"), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	req.Metadata = map[string]any{"request_path": "/v1/messages"}
+	if _, err := s.Handle("executor.execute_stream", jsonBytes(req)); err != nil {
+		t.Fatalf("start executor stream: %v", err)
+	}
+	select {
+	case <-h.clientClosed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("plugin did not close client stream")
+	}
+	h.mu.Lock()
+	emitted := append([][]byte(nil), h.emitted...)
+	h.mu.Unlock()
+	if len(s.logs) != 1 {
+		t.Fatalf("logs = %d, want 1", len(s.logs))
+	}
+	log := s.logs[0]
+	if log.StreamFrames != 65 || log.EmitCalls > 4 || log.EmitBatchMax < 16 {
+		t.Fatalf("batch metrics = frames:%d calls:%d max:%d", log.StreamFrames, log.EmitCalls, log.EmitBatchMax)
+	}
+	decoder := SSEDecoder{max: 1 << 20}
+	decoded := 0
+	for _, payload := range emitted {
+		if err := decoder.Feed(payload, func(data []byte, event string) error {
+			if !json.Valid(data) {
+				t.Fatalf("batched SSE data is invalid JSON: %q", data)
+			}
+			decoded++
+			return nil
+		}); err != nil {
+			t.Fatalf("decode batched SSE: %v", err)
+		}
+	}
+	if err := decoder.End(); err != nil {
+		t.Fatalf("batched SSE ended invalidly: %v", err)
+	}
+	if decoded != 65 {
+		t.Fatalf("decoded frames = %d, want 65", decoded)
+	}
+}
+
 func TestStreamingEmitsMultipleChunksAndHandlesClientCancel(t *testing.T) {
 	for _, test := range []struct {
 		name       string
