@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.14"
+const Version = "0.1.15"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -159,6 +159,9 @@ type LogEntry struct {
 	EmitCalls        int64     `json:"emit_calls,omitempty"`
 	EmitWaitMS       int64     `json:"emit_wait_ms,omitempty"`
 	EmitWaitMaxMS    int64     `json:"emit_wait_max_ms,omitempty"`
+	InputAuditMS     int64     `json:"input_audit_ms,omitempty"`
+	InputAuditStatus string    `json:"input_audit_status,omitempty"`
+	InputAuditDiff   string    `json:"input_audit_diff,omitempty"`
 	Attempts         []Attempt `json:"attempts"`
 	Error            string    `json:"error,omitempty"`
 }

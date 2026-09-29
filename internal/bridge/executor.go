@@ -223,9 +223,20 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 	r.Stream = false
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	start := time.Now()
+	auditMS, auditMatch, auditDiff := auditResponsesNativeInput(r)
+	prepareStarted := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
-	entry.PrepareMS = time.Since(start).Milliseconds()
+	entry.PrepareMS = time.Since(prepareStarted).Milliseconds()
+	if str(r.Metadata["request_path"]) == "/v1/responses" {
+		entry.InputAuditMS = auditMS
+		if auditMatch {
+			entry.InputAuditStatus = "match"
+		} else {
+			entry.InputAuditStatus = "mismatch"
+			entry.InputAuditDiff = auditDiff
+		}
+	}
 	defer func() {
 		entry.DurationMS = time.Since(start).Milliseconds()
 		entry.Status = statusOf(e)
@@ -359,9 +370,20 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 	r.Stream = true
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	start := time.Now()
+	auditMS, auditMatch, auditDiff := auditResponsesNativeInput(r)
+	prepareStarted := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
-	entry.PrepareMS = time.Since(start).Milliseconds()
+	entry.PrepareMS = time.Since(prepareStarted).Milliseconds()
+	if str(r.Metadata["request_path"]) == "/v1/responses" {
+		entry.InputAuditMS = auditMS
+		if auditMatch {
+			entry.InputAuditStatus = "match"
+		} else {
+			entry.InputAuditStatus = "mismatch"
+			entry.InputAuditDiff = auditDiff
+		}
+	}
 	failEarly := func(err error) (any, error) {
 		s.active.Done()
 		entry.Status = statusOf(err)
