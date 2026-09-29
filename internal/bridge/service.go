@@ -209,7 +209,7 @@ func (s *Service) refreshRegistrations() error {
 }
 
 func registration() any {
-	return map[string]any{"schema_version": 6, "metadata": map[string]any{"Name": "ClinePassBridge", "Version": Version, "Author": "xiao-qiu-qiu", "GitHubRepository": "https://github.com/nonlog/ClinePassBridge", "Description": "Cline Pass subscription adapter with reliable streaming, usage and actual provider logs", "ConfigFields": []map[string]any{{"Name": "data_dir", "Type": "string", "Description": "Persistent plugin state directory"}}}, "capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "both", "executor_input_formats": []string{"chat-completions", "claude"}, "executor_output_formats": []string{"chat-completions", "claude"}, "management_api": true}}
+	return map[string]any{"schema_version": 6, "metadata": map[string]any{"Name": "ClinePassBridge", "Version": Version, "Author": "xiao-qiu-qiu", "GitHubRepository": "https://github.com/nonlog/ClinePassBridge", "Description": "Cline Pass subscription adapter with reliable streaming, usage and actual provider logs", "ConfigFields": []map[string]any{{"Name": "data_dir", "Type": "string", "Description": "Persistent plugin state directory"}}}, "capabilities": map[string]any{"auth_provider": true, "model_provider": true, "executor": true, "executor_model_scope": "both", "executor_input_formats": []string{"chat-completions"}, "executor_output_formats": []string{"chat-completions", "claude"}, "management_api": true}}
 }
 func (s *Service) modelRegistration() any {
 	cfg := s.config()
@@ -229,7 +229,7 @@ func (s *Service) resolveModel(model string) (string, error) {
 	return "", fail(400, "model is not enabled in ClinePassBridge: "+model)
 }
 func authData(c Credential, filename string) any {
-	return map[string]any{"Provider": Provider, "ID": c.ID, "FileName": filename, "Label": c.Label, "Disabled": c.Disabled, "ProxyURL": c.ProxyURL, "StorageJSON": jsonBytes(c), "Metadata": map[string]any{"type": Provider, "request_scoped_errors": []any{map[string]any{"status": 500, "match": []string{"empty response content"}, "action": "stop"}}}, "Attributes": map[string]string{"auth_kind": "api_key"}}
+	return map[string]any{"Provider": Provider, "ID": c.ID, "FileName": filename, "Label": c.Label, "Disabled": c.Disabled, "ProxyURL": c.ProxyURL, "StorageJSON": jsonBytes(c), "Metadata": map[string]any{"type": Provider, "request_scoped_errors": requestErrorRules()}, "Attributes": map[string]string{"auth_kind": "api_key"}}
 }
 func (s *Service) parseAuth(raw json.RawMessage) (any, error) {
 	var r struct {

@@ -31,17 +31,9 @@ func (s *Service) prepare(r ExecutorRequest) (map[string]any, Credential, string
 	if e != nil {
 		return nil, c, "", e
 	}
-	var j map[string]any
-	if claudeInputRequested(r.SourceFormat) {
-		j, e = claudeRequestToOpenAI(r.Payload)
-	} else {
-		j, e = decodeObject(r.Payload)
-		if e != nil {
-			e = fail(400, "invalid request JSON")
-		}
-	}
+	j, e := decodeObject(r.Payload)
 	if e != nil {
-		return nil, c, "", e
+		return nil, c, "", fail(400, "invalid request JSON")
 	}
 	if len(list(j["messages"])) == 0 {
 		return nil, c, "", fail(400, "messages must be a nonempty array")
