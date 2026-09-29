@@ -88,6 +88,45 @@ jobs:
           path: dist/clinepassbridge_*.zip
           if-no-files-found: error
 
+  gateway-linux-amd64:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+      - name: Test gateway
+        working-directory: gateway
+        run: |
+          set -euo pipefail
+          go mod download
+          go test ./...
+      - name: Build static Gateway
+        working-directory: gateway
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../dist/clinepass-gateway ./cmd/clinepass-gateway
+      - name: Package Gateway Linux amd64
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.plugins[0].version' marketplace/registry.json)"
+          file dist/clinepass-gateway | grep -q 'ELF 64-bit.*x86-64'
+          archive="dist/clinepass-gateway_$VERSION_linux_amd64.zip"
+          zip -j "$archive" dist/clinepass-gateway
+          test "$(unzip -Z1 "$archive")" = clinepass-gateway
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-gateway-linux-amd64
+          path: dist/clinepass-gateway_*.zip
+          if-no-files-found: error
+
   darwin:
     needs: metadata
     strategy:
@@ -195,7 +234,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'nonlog/ClinePassBridge'
-    needs: [metadata, linux-amd64, linux-arm64, darwin, windows-amd64]
+    needs: [metadata, linux-amd64, linux-arm64, gateway-linux-amd64, darwin, windows-amd64]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -218,7 +257,7 @@ jobs:
             test -f "$archive"
             test "$(unzip -Z1 "$archive")" = "clinepassbridge.$extension"
           done
-          sha256sum clinepassbridge_*.zip > checksums.txt
+          sha256sum clinepassbridge_*.zip clinepass-gateway_*.zip > checksums.txt
           sha256sum -c checksums.txt
       - name: Publish GitHub release
         shell: bash
@@ -227,7 +266,7 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/clinepassbridge_*.zip dist/checksums.txt --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$GITHUB_REF_NAME" dist/clinepassbridge_*.zip dist/clinepass-gateway_*.zip dist/checksums.txt --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$GITHUB_REF_NAME" dist/clinepassbridge_*.zip dist/checksums.txt --title "$GITHUB_REF_NAME" --generate-notes --repo "$GITHUB_REPOSITORY"
+            gh release create "$GITHUB_REF_NAME" dist/clinepassbridge_*.zip dist/clinepass-gateway_*.zip dist/checksums.txt --title "$GITHUB_REF_NAME" --generate-notes --repo "$GITHUB_REPOSITORY"
           fi

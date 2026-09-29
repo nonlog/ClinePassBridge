@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,7 +10,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.20"
+const Version = "0.1.21"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -26,6 +27,7 @@ func fail(status int, message string) error { return &APIError{status, "upstream
 
 type HostCall func(string, any, any) error
 type ExecutorRequest struct {
+	ctx                                                    context.Context
 	deadline                                               time.Time
 	AuthID, AuthProvider, Model, Format, SourceFormat, Alt string
 	Stream                                                 bool
@@ -140,39 +142,42 @@ type Attempt struct {
 	Error          string `json:"error,omitempty"`
 }
 type LogEntry struct {
-	ID               string    `json:"id"`
-	Time             time.Time `json:"time"`
-	Model            string    `json:"model"`
-	UpstreamModel    string    `json:"upstream_model"`
-	Stream           bool      `json:"stream"`
-	Status           int       `json:"status"`
-	Provider         string    `json:"provider"`
-	ProviderSource   string    `json:"provider_source"`
-	DurationMS       int64     `json:"duration_ms"`
-	PrepareMS        int64     `json:"prepare_ms,omitempty"`
-	UpstreamOpenMS   int64     `json:"upstream_open_ms,omitempty"`
-	OriginalBytes    int64     `json:"original_request_bytes,omitempty"`
-	PayloadBytes     int64     `json:"payload_bytes,omitempty"`
-	UpstreamBytes    int64     `json:"upstream_request_bytes,omitempty"`
-	TTFTMS           int64     `json:"ttft_ms"`
-	FirstUpstreamMS  int64     `json:"first_upstream_ms,omitempty"`
-	FirstChoiceMS    int64     `json:"first_choice_ms,omitempty"`
-	FirstEmitMS      int64     `json:"first_emit_ms,omitempty"`
-	FirstEmitDoneMS  int64     `json:"first_emit_done_ms,omitempty"`
-	PromptTokens     int64     `json:"prompt_tokens"`
-	CompletionTokens int64     `json:"completion_tokens"`
-	CachedTokens     int64     `json:"cached_tokens"`
-	ReasoningTokens  int64     `json:"reasoning_tokens"`
-	Credential       string    `json:"credential"`
-	RequestPath      string    `json:"request_path,omitempty"`
-	SourceFormat     string    `json:"source_format,omitempty"`
-	OutputFormat     string    `json:"output_format,omitempty"`
-	Transport        string    `json:"transport,omitempty"`
-	EmitCalls        int64     `json:"emit_calls,omitempty"`
-	EmitWaitMS       int64     `json:"emit_wait_ms,omitempty"`
-	EmitWaitMaxMS    int64     `json:"emit_wait_max_ms,omitempty"`
-	Attempts         []Attempt `json:"attempts"`
-	Error            string    `json:"error,omitempty"`
+	ID                    string    `json:"id"`
+	Time                  time.Time `json:"time"`
+	Model                 string    `json:"model"`
+	UpstreamModel         string    `json:"upstream_model"`
+	Stream                bool      `json:"stream"`
+	Status                int       `json:"status"`
+	Provider              string    `json:"provider"`
+	ProviderSource        string    `json:"provider_source"`
+	DurationMS            int64     `json:"duration_ms"`
+	PrepareMS             int64     `json:"prepare_ms,omitempty"`
+	UpstreamOpenMS        int64     `json:"upstream_open_ms,omitempty"`
+	OriginalBytes         int64     `json:"original_request_bytes,omitempty"`
+	PayloadBytes          int64     `json:"payload_bytes,omitempty"`
+	UpstreamBytes         int64     `json:"upstream_request_bytes,omitempty"`
+	TTFTMS                int64     `json:"ttft_ms"`
+	FirstUpstreamMS       int64     `json:"first_upstream_ms,omitempty"`
+	FirstChoiceMS         int64     `json:"first_choice_ms,omitempty"`
+	FirstEmitMS           int64     `json:"first_emit_ms,omitempty"`
+	FirstEmitDoneMS       int64     `json:"first_emit_done_ms,omitempty"`
+	PromptTokens          int64     `json:"prompt_tokens"`
+	CompletionTokens      int64     `json:"completion_tokens"`
+	CachedTokens          int64     `json:"cached_tokens"`
+	ReasoningTokens       int64     `json:"reasoning_tokens"`
+	Credential            string    `json:"credential"`
+	RequestPath           string    `json:"request_path,omitempty"`
+	SourceFormat          string    `json:"source_format,omitempty"`
+	OutputFormat          string    `json:"output_format,omitempty"`
+	Transport             string    `json:"transport,omitempty"`
+	GatewayParseMS        int64     `json:"gateway_parse_ms,omitempty"`
+	GatewayTranslateMS    int64     `json:"gateway_translate_ms,omitempty"`
+	GatewayAffinitySource string    `json:"gateway_affinity_source,omitempty"`
+	EmitCalls             int64     `json:"emit_calls,omitempty"`
+	EmitWaitMS            int64     `json:"emit_wait_ms,omitempty"`
+	EmitWaitMaxMS         int64     `json:"emit_wait_max_ms,omitempty"`
+	Attempts              []Attempt `json:"attempts"`
+	Error                 string    `json:"error,omitempty"`
 }
 
 func jsonBytes(v any) []byte      { b, _ := json.Marshal(v); return b }
@@ -180,6 +185,10 @@ func str(v any) string            { s, _ := v.(string); return s }
 func object(v any) map[string]any { m, _ := v.(map[string]any); return m }
 func number(v any) int64 {
 	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
 	case float64:
 		return int64(n)
 	case json.Number:

@@ -10,13 +10,13 @@ import (
 )
 
 type upstreamStream struct {
-	deadline    time.Time
-	diagnostics *modelTestDiagnostics
-	direct      *directHTTPStream
+	deadline     time.Time
+	diagnostics  *modelTestDiagnostics
+	direct       *directHTTPStream
 	requestBytes int64
-	StatusCode  int         `json:"status_code"`
-	Headers     http.Header `json:"headers"`
-	StreamID    string      `json:"stream_id"`
+	StatusCode   int         `json:"status_code"`
+	Headers      http.Header `json:"headers"`
+	StreamID     string      `json:"stream_id"`
 }
 type readChunk struct {
 	Payload []byte `json:"payload"`
@@ -68,7 +68,7 @@ func (s *Service) request(r ExecutorRequest, c Credential, j map[string]any, str
 	body := jsonBytes(j)
 	cfg := s.config()
 	if cfg.TransportMode == "direct" {
-		return s.openDirectUpstream(c, body, r.deadline, diagnostics...)
+		return s.openDirectUpstream(r.ctx, c, body, r.deadline, diagnostics...)
 	}
 	up, err := s.openUpstream(map[string]any{"host_callback_id": r.HostCallbackID, "method": "POST", "url": cfg.BaseURL + "/chat/completions", "headers": headers(c), "body": body}, r.deadline, diagnostics...)
 	up.requestBytes = int64(len(body))
@@ -226,6 +226,8 @@ func (s *Service) newLog(r ExecutorRequest, c Credential, up string) LogEntry {
 		Provider: "unknown", ProviderSource: "not_reported", Credential: c.Label, Attempts: []Attempt{},
 		RequestPath: str(r.Metadata["request_path"]), SourceFormat: r.SourceFormat, OutputFormat: r.Format,
 		Transport: s.config().TransportMode, OriginalBytes: int64(len(r.OriginalRequest)), PayloadBytes: int64(len(r.Payload)),
+		GatewayParseMS: number(r.Metadata["gateway_parse_ms"]), GatewayTranslateMS: number(r.Metadata["gateway_translate_ms"]),
+		GatewayAffinitySource: str(r.Metadata["gateway_affinity_source"]),
 	}
 }
 func (s *Service) execute(r ExecutorRequest) (any, error) {

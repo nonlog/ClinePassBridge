@@ -50,7 +50,7 @@ func directClient(proxyURL string) (*http.Client, error) {
 	return actual.(*http.Client), nil
 }
 
-func (s *Service) openDirectUpstream(c Credential, body []byte, deadline time.Time, diagnostics ...*modelTestDiagnostics) (upstreamStream, error) {
+func (s *Service) openDirectUpstream(parent context.Context, c Credential, body []byte, deadline time.Time, diagnostics ...*modelTestDiagnostics) (upstreamStream, error) {
 	if deadline.IsZero() {
 		deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	}
@@ -58,7 +58,10 @@ func (s *Service) openDirectUpstream(c Credential, body []byte, deadline time.Ti
 	if err != nil {
 		return upstreamStream{}, err
 	}
-	ctx, cancelContext := context.WithDeadline(context.Background(), deadline)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancelContext := context.WithDeadline(parent, deadline)
 	done := make(chan struct{})
 	var closeOnce sync.Once
 	closeStream := func() {
