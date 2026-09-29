@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.11"
+const Version = "0.1.12"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -71,7 +71,11 @@ type RequestErrorRule struct {
 }
 
 func requestErrorRules() []RequestErrorRule {
-	return []RequestErrorRule{{Status: 500, Match: []string{"empty response content"}, Action: "stop"}}
+	return []RequestErrorRule{
+		{Status: 500, Match: []string{"empty response content"}, Action: "stop"},
+		{Status: 500, Match: []string{"Cline upstream request timed out"}, Action: "stop"},
+		{Status: 504, Match: []string{"Cline upstream request timed out"}, Action: "stop"},
+	}
 }
 
 type Model struct {
@@ -141,6 +145,8 @@ type LogEntry struct {
 	Provider         string    `json:"provider"`
 	ProviderSource   string    `json:"provider_source"`
 	DurationMS       int64     `json:"duration_ms"`
+	PrepareMS        int64     `json:"prepare_ms,omitempty"`
+	UpstreamOpenMS   int64     `json:"upstream_open_ms,omitempty"`
 	TTFTMS           int64     `json:"ttft_ms"`
 	PromptTokens     int64     `json:"prompt_tokens"`
 	CompletionTokens int64     `json:"completion_tokens"`

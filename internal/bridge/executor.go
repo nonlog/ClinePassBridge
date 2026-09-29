@@ -31,9 +31,17 @@ func (s *Service) prepare(r ExecutorRequest) (map[string]any, Credential, string
 	if e != nil {
 		return nil, c, "", e
 	}
-	j, e := decodeObject(r.Payload)
+	var j map[string]any
+	if claudeInputRequested(r.SourceFormat) {
+		j, e = claudeRequestToOpenAI(r.Payload)
+	} else {
+		j, e = decodeObject(r.Payload)
+		if e != nil {
+			e = fail(400, "invalid request JSON")
+		}
+	}
 	if e != nil {
-		return nil, c, "", fail(400, "invalid request JSON")
+		return nil, c, "", e
 	}
 	if len(list(j["messages"])) == 0 {
 		return nil, c, "", fail(400, "messages must be a nonempty array")
@@ -135,24 +143,35 @@ func (s *Service) closeUpstream(id string) {
 }
 func (s *Service) read(up upstreamStream, fn func([]byte) error) error {
 	cfg := s.config()
+	idleTimeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	var timedOut bool
 	var mu sync.Mutex
-	deadline := up.deadline
-	if deadline.IsZero() {
-		deadline = time.Now().Add(time.Duration(cfg.TimeoutSeconds) * time.Second)
+	timerDone := make(chan struct{}, 1)
+	timer := time.AfterFunc(time.Hour, func() {
+		mu.Lock()
+		timedOut = true
+		mu.Unlock()
+		s.closeUpstream(up.StreamID)
+		timerDone <- struct{}{}
+	})
+	if !timer.Stop() {
+		<-timerDone
 	}
-	timerDone := make(chan struct{})
-	timer := time.AfterFunc(time.Until(deadline), func() { defer close(timerDone); mu.Lock(); timedOut = true; mu.Unlock(); s.closeUpstream(up.StreamID) })
-	defer func() {
+	defer timer.Stop()
+	defer s.closeUpstream(up.StreamID)
+
+	total := 0
+	for {
+		mu.Lock()
+		timedOut = false
+		mu.Unlock()
+		timer.Reset(idleTimeout)
+
+		var chunk readChunk
+		e := s.call("host.http.stream_read", map[string]any{"stream_id": up.StreamID}, &chunk)
 		if !timer.Stop() {
 			<-timerDone
 		}
-	}()
-	defer s.closeUpstream(up.StreamID)
-	total := 0
-	for {
-		var chunk readChunk
-		e := s.call("host.http.stream_read", map[string]any{"stream_id": up.StreamID}, &chunk)
 		mu.Lock()
 		timeout := timedOut
 		mu.Unlock()
@@ -208,9 +227,10 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 	defer s.active.Done()
 	r.Stream = false
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
+	start := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
-	start := time.Now()
+	entry.PrepareMS = time.Since(start).Milliseconds()
 	defer func() {
 		entry.DurationMS = time.Since(start).Milliseconds()
 		entry.Status = statusOf(e)
@@ -230,7 +250,9 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 		}
 		t := time.Now()
 		var us upstreamStream
+		openStarted := time.Now()
 		us, e = s.request(r, c, j, wantStream)
+		entry.UpstreamOpenMS += time.Since(openStarted).Milliseconds()
 		if e == nil {
 			if wantStream {
 				var cp *completion
@@ -336,9 +358,10 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 	}
 	r.Stream = true
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
+	start := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
-	start := time.Now()
+	entry.PrepareMS = time.Since(start).Milliseconds()
 	failEarly := func(err error) (any, error) {
 		s.active.Done()
 		entry.Status = statusOf(err)
@@ -354,7 +377,9 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 	if r.StreamID == "" {
 		return failEarly(fail(500, "host provided no output stream identifier"))
 	}
+	openStarted := time.Now()
 	us, e := s.request(r, c, j, true)
+	entry.UpstreamOpenMS = time.Since(openStarted).Milliseconds()
 	if e != nil {
 		return failEarly(e)
 	}
