@@ -100,7 +100,9 @@ func (s *Service) openUpstream(payload any, deadline time.Time, diagnostics ...*
 			out.diagnostics = diagnostics[0]
 		}
 		if result.err != nil {
-			out.diagnostics.transportError(result.err.Error())
+			if out.diagnostics != nil {
+				out.diagnostics.transportError(result.err.Error())
+			}
 			s.closeUpstream(out.StreamID)
 			return out, fail(502, "upstream transport failed: "+safeError(result.err))
 		}
@@ -135,35 +137,30 @@ func (s *Service) closeUpstream(id string) {
 }
 func (s *Service) read(up upstreamStream, fn func([]byte) error) error {
 	cfg := s.config()
-	idleTimeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	var timedOut bool
 	var mu sync.Mutex
-	timerDone := make(chan struct{}, 1)
-	timer := time.AfterFunc(time.Hour, func() {
+	deadline := up.deadline
+	if deadline.IsZero() {
+		deadline = time.Now().Add(time.Duration(cfg.TimeoutSeconds) * time.Second)
+	}
+	timerDone := make(chan struct{})
+	timer := time.AfterFunc(time.Until(deadline), func() {
+		defer close(timerDone)
 		mu.Lock()
 		timedOut = true
 		mu.Unlock()
 		s.closeUpstream(up.StreamID)
-		timerDone <- struct{}{}
 	})
-	if !timer.Stop() {
-		<-timerDone
-	}
-	defer timer.Stop()
-	defer s.closeUpstream(up.StreamID)
-
-	total := 0
-	for {
-		mu.Lock()
-		timedOut = false
-		mu.Unlock()
-		timer.Reset(idleTimeout)
-
-		var chunk readChunk
-		e := s.call("host.http.stream_read", map[string]any{"stream_id": up.StreamID}, &chunk)
+	defer func() {
 		if !timer.Stop() {
 			<-timerDone
 		}
+	}()
+	defer s.closeUpstream(up.StreamID)
+	total := 0
+	for {
+		var chunk readChunk
+		e := s.call("host.http.stream_read", map[string]any{"stream_id": up.StreamID}, &chunk)
 		mu.Lock()
 		timeout := timedOut
 		mu.Unlock()
@@ -171,15 +168,21 @@ func (s *Service) read(up upstreamStream, fn func([]byte) error) error {
 			return fail(504, "Cline upstream request timed out")
 		}
 		if e != nil {
-			up.diagnostics.transportError(e.Error())
+			if up.diagnostics != nil {
+				up.diagnostics.transportError(e.Error())
+			}
 			return fail(502, "upstream read failed: "+safeError(e))
 		}
 		if chunk.Error != "" {
-			up.diagnostics.transportError(chunk.Error)
+			if up.diagnostics != nil {
+				up.diagnostics.transportError(chunk.Error)
+			}
 			return fail(502, "upstream stream interrupted: "+safeError(errors.New(chunk.Error)))
 		}
 		total += len(chunk.Payload)
-		up.diagnostics.capture(chunk.Payload)
+		if up.diagnostics != nil {
+			up.diagnostics.capture(chunk.Payload)
+		}
 		if total > cfg.MaxResponseBytes {
 			return fail(502, "upstream response exceeds configured limit")
 		}
@@ -287,6 +290,11 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 		if e != nil {
 			return nil, e
 		}
+	} else if responsesOutputRequested(r.Format) {
+		body, e = openAICompletionToResponses(body, r.Model, r.OriginalRequest, r.Payload)
+		if e != nil {
+			return nil, e
+		}
 	}
 	return Response{Payload: body, Headers: http.Header{"Content-Type": []string{"application/json"}}}, nil
 }
@@ -380,9 +388,14 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 		return failEarly(e)
 	}
 	nativeClaude := claudeOutputRequested(r.Format)
+	nativeResponses := responsesOutputRequested(r.Format)
 	var claudeConverter *claudeStreamConverter
+	var responsesConverter *responsesStreamConverter
 	if nativeClaude {
 		claudeConverter = newClaudeStreamConverter(r.Model, r.OriginalRequest)
+	}
+	if nativeResponses {
+		responsesConverter = newResponsesStreamConverter(r.Model, r.OriginalRequest, r.Payload)
 	}
 	go func() {
 		defer s.active.Done()
@@ -429,6 +442,18 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 				}
 				return nil
 			}
+			if nativeResponses {
+				events, convertErr := responsesConverter.Feed(b)
+				if convertErr != nil {
+					return convertErr
+				}
+				for _, event := range events {
+					if emitErr := emitDownstream(event); emitErr != nil {
+						return emitErr
+					}
+				}
+				return nil
+			}
 			// Older hosts may still request Chat Completions output for /v1/messages.
 			// Preserve the legacy bridge in that compatibility path only.
 			if str(r.Metadata["request_path"]) == "/v1/messages" {
@@ -439,6 +464,18 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 		if err == nil && nativeClaude {
 			var events [][]byte
 			events, err = claudeConverter.Done()
+			if err == nil {
+				for _, event := range events {
+					if emitErr := emitDownstream(event); emitErr != nil {
+						err = emitErr
+						break
+					}
+				}
+			}
+		}
+		if err == nil && nativeResponses {
+			var events [][]byte
+			events, err = responsesConverter.Done()
 			if err == nil {
 				for _, event := range events {
 					if emitErr := emitDownstream(event); emitErr != nil {
