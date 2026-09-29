@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.9"
+const Version = "0.1.8"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -150,8 +150,6 @@ type LogEntry struct {
 	RequestPath      string    `json:"request_path,omitempty"`
 	SourceFormat     string    `json:"source_format,omitempty"`
 	OutputFormat     string    `json:"output_format,omitempty"`
-	StreamFrames     int64     `json:"stream_frames,omitempty"`
-	EmitBatchMax     int64     `json:"emit_batch_max_frames,omitempty"`
 	EmitCalls        int64     `json:"emit_calls,omitempty"`
 	EmitWaitMS       int64     `json:"emit_wait_ms,omitempty"`
 	EmitWaitMaxMS    int64     `json:"emit_wait_max_ms,omitempty"`
