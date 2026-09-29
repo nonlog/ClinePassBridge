@@ -148,6 +148,10 @@ type LogEntry struct {
 	PrepareMS        int64     `json:"prepare_ms,omitempty"`
 	UpstreamOpenMS   int64     `json:"upstream_open_ms,omitempty"`
 	TTFTMS           int64     `json:"ttft_ms"`
+	FirstUpstreamMS  int64     `json:"first_upstream_ms,omitempty"`
+	FirstChoiceMS    int64     `json:"first_choice_ms,omitempty"`
+	FirstEmitMS      int64     `json:"first_emit_ms,omitempty"`
+	FirstEmitDoneMS  int64     `json:"first_emit_done_ms,omitempty"`
 	PromptTokens     int64     `json:"prompt_tokens"`
 	CompletionTokens int64     `json:"completion_tokens"`
 	CachedTokens     int64     `json:"cached_tokens"`

@@ -329,6 +329,9 @@ func (s *Service) consumeSSE(us upstreamStream, model string, entry *LogEntry, a
 	cp := newCompletion()
 	decoder := SSEDecoder{max: s.config().MaxResponseBytes}
 	e := s.read(us, func(b []byte) error {
+		if entry.FirstUpstreamMS == 0 && len(b) > 0 {
+			entry.FirstUpstreamMS = time.Since(start).Milliseconds()
+		}
 		return decoder.Feed(b, func(payload []byte, event string) error {
 			if strings.TrimSpace(string(payload)) == "[DONE]" {
 				cp.done = true
@@ -341,6 +344,9 @@ func (s *Service) consumeSSE(us upstreamStream, model string, entry *LogEntry, a
 			j, err := decodeObject(payload)
 			if err != nil {
 				return err
+			}
+			if entry.FirstChoiceMS == 0 && len(list(j["choices"])) > 0 {
+				entry.FirstChoiceMS = time.Since(start).Milliseconds()
 			}
 			if j["error"] != nil || event == "error" || j["success"] == false {
 				return fail(502, errorMessage(j))
@@ -443,9 +449,15 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 			_ = s.call("host.stream.close", map[string]any{"stream_id": r.StreamID, "error": safeError(err)}, nil)
 		}()
 		emitDownstream := func(payload []byte) error {
+			if entry.FirstEmitMS == 0 {
+				entry.FirstEmitMS = time.Since(start).Milliseconds()
+			}
 			emitStarted := time.Now()
 			e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": payload}, nil)
 			emitWait := time.Since(emitStarted).Milliseconds()
+			if entry.FirstEmitDoneMS == 0 {
+				entry.FirstEmitDoneMS = time.Since(start).Milliseconds()
+			}
 			entry.EmitCalls++
 			entry.EmitWaitMS += emitWait
 			if emitWait > entry.EmitWaitMaxMS {
