@@ -15,8 +15,7 @@ func decodeClaudeEventForTest(t *testing.T, payload []byte) (string, map[string]
 	}
 	var event string
 	var data []byte
-	for _, line := range strings.Split(text, "
-") {
+	for _, line := range strings.Split(text, string([]byte{10})) {
 		switch {
 		case strings.HasPrefix(line, "event: "):
 			event = strings.TrimPrefix(line, "event: ")
@@ -196,9 +195,7 @@ func TestNativeClaudeStreamingProducesCompleteUnbatchedEvents(t *testing.T) {
 			},
 		},
 	})
-	h := newFakeHost(ssePlan(reasoning, text, toolStart, toolEnd, finish, []byte("data: [DONE]
-
-")))
+	h := newFakeHost(ssePlan(reasoning, text, toolStart, toolEnd, finish, append([]byte("data: [DONE]"), 13, 10, 13, 10)))
 	s.SetHost(h.call)
 
 	var req ExecutorRequest

@@ -87,13 +87,10 @@ func claudeSSEEvent(event string, data map[string]any) ([]byte, error) {
 	out := make([]byte, 0, len(event)+len(body)+16)
 	out = append(out, "event: "...)
 	out = append(out, event...)
-	out = append(out, '
-')
+	out = append(out, 10)
 	out = append(out, "data: "...)
 	out = append(out, body...)
-	out = append(out, '
-', '
-')
+	out = append(out, 10, 10)
 	return out, nil
 }
 
