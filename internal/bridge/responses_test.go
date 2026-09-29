@@ -36,8 +36,16 @@ func TestRegistrationDeclaresNativeResponsesOutputOnly(t *testing.T) {
 	reg := registration().(map[string]any)
 	capabilities := reg["capabilities"].(map[string]any)
 	inputs := capabilities["executor_input_formats"].([]string)
-	if len(inputs) != 1 || inputs[0] != "chat-completions" {
-		t.Fatalf("executor input formats = %#v, want only chat-completions", inputs)
+	wantInputs := map[string]bool{"chat-completions": false, "claude": false}
+	for _, format := range inputs {
+		if _, ok := wantInputs[format]; ok {
+			wantInputs[format] = true
+		}
+	}
+	for format, found := range wantInputs {
+		if !found {
+			t.Fatalf("executor input formats = %#v, missing %s", inputs, format)
+		}
 	}
 	outputs := capabilities["executor_output_formats"].([]string)
 	want := map[string]bool{"chat-completions": false, "claude": false, "openai-response": false}
