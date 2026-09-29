@@ -372,7 +372,7 @@ func reasoningEffortFromBudget(budget int64) string {
 
 
 func auditClaudeNativeInput(r ExecutorRequest) (int64, bool, string) {
-	if str(r.Metadata["request_path"]) != "/v1/messages" || len(r.OriginalRequest) == 0 || len(r.Payload) == 0 {
+	if claudeInputRequested(r.SourceFormat) || str(r.Metadata["request_path"]) != "/v1/messages" || len(r.OriginalRequest) == 0 || len(r.Payload) == 0 {
 		return 0, false, ""
 	}
 	var actual map[string]any
