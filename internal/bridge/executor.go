@@ -31,9 +31,14 @@ func (s *Service) prepare(r ExecutorRequest) (map[string]any, Credential, string
 	if e != nil {
 		return nil, c, "", e
 	}
-	j, e := decodeObject(r.Payload)
-	if e != nil {
-		return nil, c, "", fail(400, "invalid request JSON")
+	var j map[string]any
+	if claudeInputRequested(r.SourceFormat) {
+		j, e = claudeRequestToOpenAI(r.Payload, up, r.Stream)
+	} else {
+		j, e = decodeObject(r.Payload)
+		if e != nil {
+			return nil, c, "", fail(400, "invalid request JSON")
+		}
 	}
 	if len(list(j["messages"])) == 0 {
 		return nil, c, "", fail(400, "messages must be a nonempty array")
@@ -100,7 +105,9 @@ func (s *Service) openUpstream(payload any, deadline time.Time, diagnostics ...*
 			out.diagnostics = diagnostics[0]
 		}
 		if result.err != nil {
-			out.diagnostics.transportError(result.err.Error())
+			if out.diagnostics != nil {
+				out.diagnostics.transportError(result.err.Error())
+			}
 			s.closeUpstream(out.StreamID)
 			return out, fail(502, "upstream transport failed: "+safeError(result.err))
 		}
@@ -135,35 +142,30 @@ func (s *Service) closeUpstream(id string) {
 }
 func (s *Service) read(up upstreamStream, fn func([]byte) error) error {
 	cfg := s.config()
-	idleTimeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	var timedOut bool
 	var mu sync.Mutex
-	timerDone := make(chan struct{}, 1)
-	timer := time.AfterFunc(time.Hour, func() {
+	deadline := up.deadline
+	if deadline.IsZero() {
+		deadline = time.Now().Add(time.Duration(cfg.TimeoutSeconds) * time.Second)
+	}
+	timerDone := make(chan struct{})
+	timer := time.AfterFunc(time.Until(deadline), func() {
+		defer close(timerDone)
 		mu.Lock()
 		timedOut = true
 		mu.Unlock()
 		s.closeUpstream(up.StreamID)
-		timerDone <- struct{}{}
 	})
-	if !timer.Stop() {
-		<-timerDone
-	}
-	defer timer.Stop()
-	defer s.closeUpstream(up.StreamID)
-
-	total := 0
-	for {
-		mu.Lock()
-		timedOut = false
-		mu.Unlock()
-		timer.Reset(idleTimeout)
-
-		var chunk readChunk
-		e := s.call("host.http.stream_read", map[string]any{"stream_id": up.StreamID}, &chunk)
+	defer func() {
 		if !timer.Stop() {
 			<-timerDone
 		}
+	}()
+	defer s.closeUpstream(up.StreamID)
+	total := 0
+	for {
+		var chunk readChunk
+		e := s.call("host.http.stream_read", map[string]any{"stream_id": up.StreamID}, &chunk)
 		mu.Lock()
 		timeout := timedOut
 		mu.Unlock()
@@ -171,15 +173,21 @@ func (s *Service) read(up upstreamStream, fn func([]byte) error) error {
 			return fail(504, "Cline upstream request timed out")
 		}
 		if e != nil {
-			up.diagnostics.transportError(e.Error())
+			if up.diagnostics != nil {
+				up.diagnostics.transportError(e.Error())
+			}
 			return fail(502, "upstream read failed: "+safeError(e))
 		}
 		if chunk.Error != "" {
-			up.diagnostics.transportError(chunk.Error)
+			if up.diagnostics != nil {
+				up.diagnostics.transportError(chunk.Error)
+			}
 			return fail(502, "upstream stream interrupted: "+safeError(errors.New(chunk.Error)))
 		}
 		total += len(chunk.Payload)
-		up.diagnostics.capture(chunk.Payload)
+		if up.diagnostics != nil {
+			up.diagnostics.capture(chunk.Payload)
+		}
 		if total > cfg.MaxResponseBytes {
 			return fail(502, "upstream response exceeds configured limit")
 		}

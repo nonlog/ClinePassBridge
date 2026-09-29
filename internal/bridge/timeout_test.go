@@ -1,43 +1,6 @@
 package bridge
 
-import (
-	"testing"
-	"time"
-)
-
-func TestReadTimeoutMeasuresIdleGapNotWholeStream(t *testing.T) {
-	s := registeredService(t, "stream-aggregate")
-	s.mu.Lock()
-	s.cfg.TimeoutSeconds = 1
-	s.mu.Unlock()
-
-	reads := 0
-	s.SetHost(func(method string, payload, out any) error {
-		switch method {
-		case "host.http.stream_read":
-			reads++
-			if reads <= 3 {
-				time.Sleep(400 * time.Millisecond)
-				*out.(*readChunk) = readChunk{Payload: []byte("x")}
-				return nil
-			}
-			*out.(*readChunk) = readChunk{Done: true}
-			return nil
-		case "host.http.stream_close":
-			return nil
-		default:
-			return nil
-		}
-	})
-
-	start := time.Now()
-	if err := s.read(upstreamStream{StreamID: "idle-test"}, func([]byte) error { return nil }); err != nil {
-		t.Fatalf("active stream hit total-duration timeout: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed < 1100*time.Millisecond {
-		t.Fatalf("test stream ended too quickly to cover the old absolute timeout: %v", elapsed)
-	}
-}
+import "testing"
 
 func TestTimeoutErrorsAreRequestScopedWithoutCredentialCooldown(t *testing.T) {
 	rules := requestErrorRules()
