@@ -31,7 +31,15 @@ func (s *Service) prepare(r ExecutorRequest) (map[string]any, Credential, string
 	if e != nil {
 		return nil, c, "", e
 	}
-	j, e := decodeObject(r.Payload)
+	var j map[string]any
+	switch r.SourceFormat {
+	case "claude":
+		j, e = s.convertClaudeInput(r.Payload, r.Model, r.Stream)
+	case "openai-response":
+		j, e = s.convertResponsesInput(r.Payload, r.Model, r.Stream)
+	default:
+		j, e = decodeObject(r.Payload)
+	}
 	if e != nil {
 		return nil, c, "", fail(400, "invalid request JSON")
 	}

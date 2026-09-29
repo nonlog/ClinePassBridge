@@ -32,21 +32,29 @@ func decodeResponsesEventForTest(t *testing.T, payload []byte) (string, map[stri
 	return event, body
 }
 
-func TestRegistrationDeclaresNativeResponsesOutputOnly(t *testing.T) {
+func TestRegistrationDeclaresNativeResponsesIO(t *testing.T) {
 	reg := registration().(map[string]any)
 	capabilities := reg["capabilities"].(map[string]any)
 	inputs := capabilities["executor_input_formats"].([]string)
-	if len(inputs) != 1 || inputs[0] != "chat-completions" {
-		t.Fatalf("executor input formats = %#v, want only chat-completions", inputs)
-	}
-	outputs := capabilities["executor_output_formats"].([]string)
 	want := map[string]bool{"chat-completions": false, "claude": false, "openai-response": false}
-	for _, format := range outputs {
+	for _, format := range inputs {
 		if _, ok := want[format]; ok {
 			want[format] = true
 		}
 	}
 	for format, found := range want {
+		if !found {
+			t.Fatalf("executor input formats = %#v, missing %s", inputs, format)
+		}
+	}
+	outputs := capabilities["executor_output_formats"].([]string)
+	wantOut := map[string]bool{"chat-completions": false, "claude": false, "openai-response": false}
+	for _, format := range outputs {
+		if _, ok := wantOut[format]; ok {
+			wantOut[format] = true
+		}
+	}
+	for format, found := range wantOut {
 		if !found {
 			t.Fatalf("executor output formats = %#v, missing %s", outputs, format)
 		}
