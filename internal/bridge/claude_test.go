@@ -53,6 +53,7 @@ func TestRegistrationDeclaresNativeClaudeOutput(t *testing.T) {
 
 func TestNativeClaudeNonstreamPreservesReasoningToolsNamesAndUsage(t *testing.T) {
 	s := registeredService(t, "native")
+    toolArgs := string(jsonBytes(map[string]any{"q": "x"}))
 	data := map[string]any{
 		"id": "chatcmpl-test",
 		"choices": []any{map[string]any{
@@ -66,7 +67,7 @@ func TestNativeClaudeNonstreamPreservesReasoningToolsNamesAndUsage(t *testing.T)
 					"id": "call:1",
 					"function": map[string]any{
 						"name":      "lookuptool",
-						"arguments": "{"q":"x"}",
+                            "arguments": toolArgs,
 					},
 				}},
 			},
@@ -136,6 +137,8 @@ func TestNativeClaudeNonstreamPreservesReasoningToolsNamesAndUsage(t *testing.T)
 
 func TestNativeClaudeStreamingProducesCompleteUnbatchedEvents(t *testing.T) {
 	s := registeredService(t, "native-fallback")
+    toolArgs := string(jsonBytes(map[string]any{"q": "x"}))
+    split := len(toolArgs) / 2
 	reasoning := sseFrame(map[string]any{
 		"id": "chatcmpl-stream",
 		"choices": []any{map[string]any{
@@ -159,7 +162,7 @@ func TestNativeClaudeStreamingProducesCompleteUnbatchedEvents(t *testing.T) {
 				"id":    "call:1",
 				"function": map[string]any{
 					"name":      "lookuptool",
-					"arguments": "{"q":",
+                    "arguments": toolArgs[:split],
 				},
 			}}},
 		}},
@@ -171,7 +174,7 @@ func TestNativeClaudeStreamingProducesCompleteUnbatchedEvents(t *testing.T) {
 			"delta": map[string]any{"tool_calls": []any{map[string]any{
 				"index": 0,
 				"function": map[string]any{
-					"arguments": ""x"}",
+                    "arguments": toolArgs[split:],
 				},
 			}}},
 		}},
@@ -253,7 +256,7 @@ func TestNativeClaudeStreamingProducesCompleteUnbatchedEvents(t *testing.T) {
 		if event != wantEvents[i] {
 			t.Fatalf("event %d = %q, want %q", i, event, wantEvents[i])
 		}
-		if strings.Contains(string(payload), ""choices"") {
+        if strings.Contains(string(payload), "choices") {
 			t.Fatalf("event %d leaked OpenAI chunk instead of native Claude SSE: %s", i, payload)
 		}
 		bodies[i] = body
@@ -268,7 +271,7 @@ func TestNativeClaudeStreamingProducesCompleteUnbatchedEvents(t *testing.T) {
 	if tool["type"] != "tool_use" || tool["id"] != "call_1" || tool["name"] != "LookupTool" {
 		t.Fatalf("tool start = %#v", bodies[7])
 	}
-	if object(bodies[8]["delta"])["partial_json"] != "{"q":"x"}" {
+    if object(bodies[8]["delta"])["partial_json"] != toolArgs {
 		t.Fatalf("tool JSON delta = %#v", bodies[8])
 	}
 	messageDelta := bodies[10]
