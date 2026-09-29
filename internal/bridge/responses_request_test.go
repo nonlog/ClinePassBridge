@@ -48,7 +48,7 @@ func TestNativeResponsesRequestBasicConversion(t *testing.T) {
 
 func TestResponsesInputAuditMatchesEquivalentJSON(t *testing.T) {
 	original := jsonBytes(map[string]any{
-		"input": []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hi"}}},
+		"input": []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hi"}}}},
 	})
 	actual, err := responsesRequestToChatNative(original, "m", true)
 	if err != nil {

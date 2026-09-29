@@ -223,12 +223,12 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 	r.Stream = false
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	start := time.Now()
-	auditMS, auditMatch, auditDiff := auditResponsesNativeInput(r)
+	auditMS, auditMatch, auditDiff := auditNativeInput(r)
 	prepareStarted := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
 	entry.PrepareMS = time.Since(prepareStarted).Milliseconds()
-	if str(r.Metadata["request_path"]) == "/v1/responses" {
+	if p := str(r.Metadata["request_path"]); p == "/v1/responses" || p == "/v1/messages" {
 		entry.InputAuditMS = auditMS
 		if auditMatch {
 			entry.InputAuditStatus = "match"
@@ -370,12 +370,12 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 	r.Stream = true
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	start := time.Now()
-	auditMS, auditMatch, auditDiff := auditResponsesNativeInput(r)
+	auditMS, auditMatch, auditDiff := auditNativeInput(r)
 	prepareStarted := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
 	entry.PrepareMS = time.Since(prepareStarted).Milliseconds()
-	if str(r.Metadata["request_path"]) == "/v1/responses" {
+	if p := str(r.Metadata["request_path"]); p == "/v1/responses" || p == "/v1/messages" {
 		entry.InputAuditMS = auditMS
 		if auditMatch {
 			entry.InputAuditStatus = "match"
