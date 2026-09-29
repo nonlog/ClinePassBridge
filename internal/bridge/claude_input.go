@@ -79,17 +79,12 @@ func claudeRequestToOpenAI(raw []byte, model string, stream bool) (map[string]an
 		case "assistant":
 			openAIParts := make([]any, 0, len(parts))
 			toolCalls := make([]any, 0)
-			reasoning := make([]string, 0)
 			for _, rawPart := range parts {
 				part := object(rawPart)
 				switch str(part["type"]) {
 				case "text", "image":
 					if converted, ok := claudeContentPart(part); ok {
 						openAIParts = append(openAIParts, converted)
-					}
-				case "thinking":
-					if text := strings.TrimSpace(str(part["thinking"])); text != "" {
-						reasoning = append(reasoning, text)
 					}
 				case "tool_use":
 					id := str(part["id"])
@@ -113,7 +108,7 @@ func claudeRequestToOpenAI(raw []byte, model string, stream bool) (map[string]an
 					})
 				}
 			}
-			if len(openAIParts) == 0 && len(toolCalls) == 0 && len(reasoning) == 0 {
+			if len(openAIParts) == 0 && len(toolCalls) == 0 {
 				continue
 			}
 			converted := map[string]any{"role": "assistant"}
@@ -121,9 +116,6 @@ func claudeRequestToOpenAI(raw []byte, model string, stream bool) (map[string]an
 				converted["content"] = openAIParts
 			} else {
 				converted["content"] = ""
-			}
-			if len(reasoning) > 0 {
-				converted["reasoning_content"] = strings.Join(reasoning, "\n\n")
 			}
 			if len(toolCalls) > 0 {
 				converted["tool_calls"] = toolCalls

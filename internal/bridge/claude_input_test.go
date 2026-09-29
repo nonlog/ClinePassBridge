@@ -61,8 +61,8 @@ func TestClaudeInputConversionPreservesToolsResultsAndEffort(t *testing.T) {
 		t.Fatalf("converted roles = %#v", messages)
 	}
 	assistant := object(messages[1])
-	if assistant["reasoning_content"] != "prior reasoning" {
-		t.Fatalf("reasoning content lost: %#v", assistant)
+	if _, exists := assistant["reasoning_content"]; exists {
+		t.Fatalf("unsigned Claude thinking must not be replayed upstream: %#v", assistant)
 	}
 	calls := list(assistant["tool_calls"])
 	if len(calls) != 1 || str(object(object(calls[0])["function"])["name"]) != "ReadFile" {
