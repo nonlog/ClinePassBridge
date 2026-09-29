@@ -65,7 +65,11 @@ func (s *Service) request(r ExecutorRequest, c Credential, j map[string]any, str
 		delete(j, "stream_options")
 	}
 	body := jsonBytes(j)
-	up, err := s.openUpstream(map[string]any{"host_callback_id": r.HostCallbackID, "method": "POST", "url": s.config().BaseURL + "/chat/completions", "headers": headers(c), "body": body}, r.deadline, diagnostics...)
+	cfg := s.config()
+	if cfg.TransportMode == "direct" {
+		return s.openDirectUpstream(c, body, r.deadline, diagnostics...)
+	}
+	up, err := s.openUpstream(map[string]any{"host_callback_id": r.HostCallbackID, "method": "POST", "url": cfg.BaseURL + "/chat/completions", "headers": headers(c), "body": body}, r.deadline, diagnostics...)
 	up.requestBytes = int64(len(body))
 	return up, err
 }
@@ -140,6 +144,9 @@ func (s *Service) closeUpstream(id string) {
 	}
 }
 func (s *Service) read(up upstreamStream, fn func([]byte) error) error {
+	if up.direct != nil {
+		return s.readDirect(up, fn)
+	}
 	cfg := s.config()
 	var timedOut bool
 	var mu sync.Mutex
@@ -217,7 +224,7 @@ func (s *Service) newLog(r ExecutorRequest, c Credential, up string) LogEntry {
 		ID: id(), Time: time.Now().UTC(), Model: r.Model, UpstreamModel: up, Stream: r.Stream,
 		Provider: "unknown", ProviderSource: "not_reported", Credential: c.Label, Attempts: []Attempt{},
 		RequestPath: str(r.Metadata["request_path"]), SourceFormat: r.SourceFormat, OutputFormat: r.Format,
-		OriginalBytes: int64(len(r.OriginalRequest)), PayloadBytes: int64(len(r.Payload)),
+		Transport: s.config().TransportMode, OriginalBytes: int64(len(r.OriginalRequest)), PayloadBytes: int64(len(r.Payload)),
 	}
 }
 func (s *Service) execute(r ExecutorRequest) (any, error) {

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.19"
+const Version = "0.1.20"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -88,13 +88,14 @@ type Config struct {
 	BaseURL          string  `json:"base_url" yaml:"base_url"`
 	Models           []Model `json:"models" yaml:"models"`
 	NonstreamMode    string  `json:"nonstream_mode" yaml:"nonstream_mode"`
+	TransportMode    string  `json:"transport_mode" yaml:"transport_mode"`
 	TimeoutSeconds   int     `json:"timeout_seconds" yaml:"timeout_seconds"`
 	LogRetention     int     `json:"log_retention" yaml:"log_retention"`
 	MaxResponseBytes int     `json:"max_response_bytes" yaml:"max_response_bytes"`
 }
 
 func defaultConfig() Config {
-	return Config{DataDir: "plugins/clinepassbridge-data", BaseURL: "https://api.cline.bot/api/v1", Models: []Model{}, NonstreamMode: "stream-aggregate", TimeoutSeconds: 180, LogRetention: 1000, MaxResponseBytes: 16 << 20}
+	return Config{DataDir: "plugins/clinepassbridge-data", BaseURL: "https://api.cline.bot/api/v1", Models: []Model{}, NonstreamMode: "stream-aggregate", TransportMode: "host", TimeoutSeconds: 180, LogRetention: 1000, MaxResponseBytes: 16 << 20}
 }
 func (c *Config) validate() error {
 	u, e := url.Parse(c.BaseURL)
@@ -112,6 +113,9 @@ func (c *Config) validate() error {
 	}
 	if c.NonstreamMode != "native" && c.NonstreamMode != "native-fallback" && c.NonstreamMode != "stream-aggregate" {
 		return fail(400, "invalid nonstream_mode")
+	}
+	if c.TransportMode != "host" && c.TransportMode != "direct" {
+		return fail(400, "transport_mode must be host or direct")
 	}
 	seen := map[string]bool{}
 	for i := range c.Models {
@@ -163,6 +167,7 @@ type LogEntry struct {
 	RequestPath      string    `json:"request_path,omitempty"`
 	SourceFormat     string    `json:"source_format,omitempty"`
 	OutputFormat     string    `json:"output_format,omitempty"`
+	Transport        string    `json:"transport,omitempty"`
 	EmitCalls        int64     `json:"emit_calls,omitempty"`
 	EmitWaitMS       int64     `json:"emit_wait_ms,omitempty"`
 	EmitWaitMaxMS    int64     `json:"emit_wait_max_ms,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -896,4 +897,75 @@ func TestSSEAllChoicesMustFinishAndRefusalLogprobsAccumulate(t *testing.T) {
 			t.Fatalf("refusal/logprobs across frames = %#v", choice)
 		}
 	})
+}
+
+
+func TestTransportModeValidation(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.TransportMode != "host" {
+		t.Fatalf("default transport mode = %q, want host", cfg.TransportMode)
+	}
+	cfg.TransportMode = "direct"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("direct transport rejected: %v", err)
+	}
+	cfg.TransportMode = "invalid"
+	if err := cfg.validate(); err == nil {
+		t.Fatal("invalid transport mode was accepted")
+	}
+}
+
+func TestDirectTransportStreamsWithoutHostHTTPCallback(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("direct path = %q", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode direct body: %v", err)
+		}
+		if body["stream"] != true || str(body["model"]) != "cline-pass/deepseek-v4.1-flash" {
+			t.Fatalf("direct body = %#v", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write(simpleSSE())
+	}))
+	defer server.Close()
+
+	s := NewService()
+	s.mu.Lock()
+	s.cfg.TransportMode = "direct"
+	s.cfg.BaseURL = server.URL
+	s.cfg.Models = []Model{{ID: "deepseek-flash", UpstreamID: "cline-pass/deepseek-v4.1-flash"}}
+	s.mu.Unlock()
+
+	hostCalled := false
+	s.SetHost(func(method string, payload, out any) error {
+		hostCalled = true
+		return fmt.Errorf("unexpected host callback %s", method)
+	})
+	credential := Credential{Type: Provider, ID: "credential-1", Label: "test", APIKey: "direct-key"}
+	j := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hello"}}, "model": "cline-pass/deepseek-v4.1-flash"}
+	up, err := s.request(ExecutorRequest{}, credential, j, true)
+	if err != nil {
+		t.Fatalf("direct request: %v", err)
+	}
+	if up.StreamID != "" || up.direct == nil || up.requestBytes == 0 {
+		t.Fatalf("direct upstream handle = %#v", up)
+	}
+	var raw bytes.Buffer
+	if err := s.read(up, func(chunk []byte) error { _, _ = raw.Write(chunk); return nil }); err != nil {
+		t.Fatalf("read direct response: %v", err)
+	}
+	if hostCalled {
+		t.Fatal("direct transport used host HTTP callback")
+	}
+	if gotAuth != "Bearer direct-key" {
+		t.Fatalf("direct authorization = %q", gotAuth)
+	}
+	if !bytes.Contains(raw.Bytes(), []byte("data: [DONE]")) {
+		t.Fatalf("direct stream lost SSE data: %q", raw.Bytes())
+	}
 }
