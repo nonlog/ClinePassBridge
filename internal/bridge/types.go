@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.18"
+const Version = "0.1.19"
 const Provider = "cline-pass"
 const PluginID = "clinepassbridge"
 
@@ -147,6 +147,9 @@ type LogEntry struct {
 	DurationMS       int64     `json:"duration_ms"`
 	PrepareMS        int64     `json:"prepare_ms,omitempty"`
 	UpstreamOpenMS   int64     `json:"upstream_open_ms,omitempty"`
+	OriginalBytes    int64     `json:"original_request_bytes,omitempty"`
+	PayloadBytes     int64     `json:"payload_bytes,omitempty"`
+	UpstreamBytes    int64     `json:"upstream_request_bytes,omitempty"`
 	TTFTMS           int64     `json:"ttft_ms"`
 	FirstUpstreamMS  int64     `json:"first_upstream_ms,omitempty"`
 	FirstChoiceMS    int64     `json:"first_choice_ms,omitempty"`

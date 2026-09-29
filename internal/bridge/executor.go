@@ -12,6 +12,7 @@ import (
 type upstreamStream struct {
 	deadline    time.Time
 	diagnostics *modelTestDiagnostics
+	requestBytes int64
 	StatusCode  int         `json:"status_code"`
 	Headers     http.Header `json:"headers"`
 	StreamID    string      `json:"stream_id"`
@@ -63,7 +64,10 @@ func (s *Service) request(r ExecutorRequest, c Credential, j map[string]any, str
 	} else {
 		delete(j, "stream_options")
 	}
-	return s.openUpstream(map[string]any{"host_callback_id": r.HostCallbackID, "method": "POST", "url": s.config().BaseURL + "/chat/completions", "headers": headers(c), "body": jsonBytes(j)}, r.deadline, diagnostics...)
+	body := jsonBytes(j)
+	up, err := s.openUpstream(map[string]any{"host_callback_id": r.HostCallbackID, "method": "POST", "url": s.config().BaseURL + "/chat/completions", "headers": headers(c), "body": body}, r.deadline, diagnostics...)
+	up.requestBytes = int64(len(body))
+	return up, err
 }
 
 func (s *Service) openUpstream(payload any, deadline time.Time, diagnostics ...*modelTestDiagnostics) (upstreamStream, error) {
@@ -213,6 +217,7 @@ func (s *Service) newLog(r ExecutorRequest, c Credential, up string) LogEntry {
 		ID: id(), Time: time.Now().UTC(), Model: r.Model, UpstreamModel: up, Stream: r.Stream,
 		Provider: "unknown", ProviderSource: "not_reported", Credential: c.Label, Attempts: []Attempt{},
 		RequestPath: str(r.Metadata["request_path"]), SourceFormat: r.SourceFormat, OutputFormat: r.Format,
+		OriginalBytes: int64(len(r.OriginalRequest)), PayloadBytes: int64(len(r.Payload)),
 	}
 }
 func (s *Service) execute(r ExecutorRequest) (any, error) {
@@ -249,6 +254,9 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 		openStarted := time.Now()
 		us, e = s.request(r, c, j, wantStream)
 		entry.UpstreamOpenMS += time.Since(openStarted).Milliseconds()
+		if us.requestBytes > entry.UpstreamBytes {
+			entry.UpstreamBytes = us.requestBytes
+		}
 		if e == nil {
 			if wantStream {
 				var cp *completion
@@ -388,6 +396,7 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 	openStarted := time.Now()
 	us, e := s.request(r, c, j, true)
 	entry.UpstreamOpenMS = time.Since(openStarted).Milliseconds()
+	entry.UpstreamBytes = us.requestBytes
 	if e != nil {
 		return failEarly(e)
 	}
