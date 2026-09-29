@@ -241,8 +241,7 @@ func claudeToolResultContent(value any) (string, []any) {
 			}
 		}
 	}
-	content := strings.Join(texts, "
-")
+	content := strings.Join(texts, string([]byte{10}))
 	if content == "" && len(images) > 0 {
 		content = "[Tool returned image content; the images follow in the next user message.]"
 	}
