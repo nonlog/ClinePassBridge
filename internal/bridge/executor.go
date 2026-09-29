@@ -12,6 +12,7 @@ import (
 type upstreamStream struct {
 	deadline    time.Time
 	diagnostics *modelTestDiagnostics
+	direct      *directHTTPStream
 	requestBytes int64
 	StatusCode  int         `json:"status_code"`
 	Headers     http.Header `json:"headers"`
