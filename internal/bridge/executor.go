@@ -31,12 +31,7 @@ func (s *Service) prepare(r ExecutorRequest) (map[string]any, Credential, string
 	if e != nil {
 		return nil, c, "", e
 	}
-	var j map[string]any
-	if claudeInputRequested(r.SourceFormat) {
-		j, e = claudeRequestToOpenAINative(r.Payload, r.Model, r.Stream)
-	} else {
-		j, e = decodeObject(r.Payload)
-	}
+	j, e := decodeObject(r.Payload)
 	if e != nil {
 		return nil, c, "", fail(400, "invalid request JSON")
 	}
@@ -228,20 +223,10 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 	r.Stream = false
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	start := time.Now()
-	auditMS, auditMatch, auditDiff := auditNativeInput(r)
 	prepareStarted := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
 	entry.PrepareMS = time.Since(prepareStarted).Milliseconds()
-	if p := str(r.Metadata["request_path"]); p == "/v1/responses" || p == "/v1/messages" {
-		entry.InputAuditMS = auditMS
-		if auditMatch {
-			entry.InputAuditStatus = "match"
-		} else {
-			entry.InputAuditStatus = "mismatch"
-			entry.InputAuditDiff = auditDiff
-		}
-	}
 	defer func() {
 		entry.DurationMS = time.Since(start).Milliseconds()
 		entry.Status = statusOf(e)
@@ -381,20 +366,10 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 	r.Stream = true
 	r.deadline = time.Now().Add(time.Duration(s.config().TimeoutSeconds) * time.Second)
 	start := time.Now()
-	auditMS, auditMatch, auditDiff := auditNativeInput(r)
 	prepareStarted := time.Now()
 	j, c, up, e := s.prepare(r)
 	entry := s.newLog(r, c, up)
 	entry.PrepareMS = time.Since(prepareStarted).Milliseconds()
-	if p := str(r.Metadata["request_path"]); p == "/v1/responses" || p == "/v1/messages" {
-		entry.InputAuditMS = auditMS
-		if auditMatch {
-			entry.InputAuditStatus = "match"
-		} else {
-			entry.InputAuditStatus = "mismatch"
-			entry.InputAuditDiff = auditDiff
-		}
-	}
 	failEarly := func(err error) (any, error) {
 		s.active.Done()
 		entry.Status = statusOf(err)
