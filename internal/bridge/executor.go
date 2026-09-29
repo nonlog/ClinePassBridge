@@ -268,6 +268,12 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 	if e != nil {
 		return nil, e
 	}
+	if claudeOutputRequested(r.Format) {
+		body, e = openAICompletionToClaude(body, r.Model, r.OriginalRequest)
+		if e != nil {
+			return nil, e
+		}
+	}
 	return Response{Payload: body, Headers: http.Header{"Content-Type": []string{"application/json"}}}, nil
 }
 func (s *Service) consumeSSE(us upstreamStream, model string, entry *LogEntry, attempt *Attempt, start time.Time, emit func([]byte) error) (*completion, error) {
@@ -356,6 +362,11 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 		_, e = s.readJSON(us)
 		return failEarly(e)
 	}
+	nativeClaude := claudeOutputRequested(r.Format)
+	var claudeConverter *claudeStreamConverter
+	if nativeClaude {
+		claudeConverter = newClaudeStreamConverter(r.Model, r.OriginalRequest)
+	}
 	go func() {
 		defer s.active.Done()
 		attempt := Attempt{Mode: "stream", Provider: "unknown", ProviderSource: "not_reported"}
@@ -374,15 +385,9 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 			s.appendLog(entry)
 			_ = s.call("host.stream.close", map[string]any{"stream_id": r.StreamID, "error": safeError(err)}, nil)
 		}()
-		_, err = s.consumeSSE(us, r.Model, &entry, &attempt, start, func(b []byte) error {
-			// CPA v7.3.12 passes native Chat Completions through as raw JSON,
-			// but its OpenAI-to-Claude translator requires SSE input. The host
-			// rewrites Format/SourceFormat; request_path preserves the HTTP route.
-			if str(r.Metadata["request_path"]) == "/v1/messages" {
-				b = append(append([]byte("data: "), b...), []byte("\n\n")...)
-			}
+		emitDownstream := func(payload []byte) error {
 			emitStarted := time.Now()
-			e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": b}, nil)
+			e := s.call("host.stream.emit", map[string]any{"stream_id": r.StreamID, "payload": payload}, nil)
 			emitWait := time.Since(emitStarted).Milliseconds()
 			entry.EmitCalls++
 			entry.EmitWaitMS += emitWait
@@ -393,7 +398,40 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 				return fail(499, "client disconnected")
 			}
 			return nil
+		}
+		_, err = s.consumeSSE(us, r.Model, &entry, &attempt, start, func(b []byte) error {
+			if nativeClaude {
+				events, convertErr := claudeConverter.Feed(b)
+				if convertErr != nil {
+					return convertErr
+				}
+				for _, event := range events {
+					if emitErr := emitDownstream(event); emitErr != nil {
+						return emitErr
+					}
+				}
+				return nil
+			}
+			// Older hosts may still request Chat Completions output for /v1/messages.
+			// Preserve the legacy bridge in that compatibility path only.
+			if str(r.Metadata["request_path"]) == "/v1/messages" {
+				b = append(append([]byte("data: "), b...), []byte("\n\n")...)
+			}
+			return emitDownstream(b)
 		})
+		if err == nil && nativeClaude {
+			var events [][]byte
+			events, err = claudeConverter.Done()
+			if err == nil {
+				for _, event := range events {
+					if emitErr := emitDownstream(event); emitErr != nil {
+						err = emitErr
+						break
+					}
+				}
+			}
+		}
+
 	}()
 	return map[string]any{"headers": http.Header{"Content-Type": []string{"text/event-stream"}, "Cache-Control": []string{"no-cache"}}}, nil
 }
