@@ -31,14 +31,9 @@ func (s *Service) prepare(r ExecutorRequest) (map[string]any, Credential, string
 	if e != nil {
 		return nil, c, "", e
 	}
-	var j map[string]any
-	if claudeInputRequested(r.SourceFormat) {
-		j, e = claudeRequestToOpenAI(r.Payload, up, r.Stream)
-	} else {
-		j, e = decodeObject(r.Payload)
-		if e != nil {
-			return nil, c, "", fail(400, "invalid request JSON")
-		}
+	j, e := decodeObject(r.Payload)
+	if e != nil {
+		return nil, c, "", fail(400, "invalid request JSON")
 	}
 	if len(list(j["messages"])) == 0 {
 		return nil, c, "", fail(400, "messages must be a nonempty array")
@@ -295,6 +290,11 @@ func (s *Service) execute(r ExecutorRequest) (any, error) {
 		if e != nil {
 			return nil, e
 		}
+	} else if responsesOutputRequested(r.Format) {
+		body, e = openAICompletionToResponses(body, r.Model, r.OriginalRequest, r.Payload)
+		if e != nil {
+			return nil, e
+		}
 	}
 	return Response{Payload: body, Headers: http.Header{"Content-Type": []string{"application/json"}}}, nil
 }
@@ -388,9 +388,14 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 		return failEarly(e)
 	}
 	nativeClaude := claudeOutputRequested(r.Format)
+	nativeResponses := responsesOutputRequested(r.Format)
 	var claudeConverter *claudeStreamConverter
+	var responsesConverter *responsesStreamConverter
 	if nativeClaude {
 		claudeConverter = newClaudeStreamConverter(r.Model, r.OriginalRequest)
+	}
+	if nativeResponses {
+		responsesConverter = newResponsesStreamConverter(r.Model, r.OriginalRequest, r.Payload)
 	}
 	go func() {
 		defer s.active.Done()
@@ -437,6 +442,18 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 				}
 				return nil
 			}
+			if nativeResponses {
+				events, convertErr := responsesConverter.Feed(b)
+				if convertErr != nil {
+					return convertErr
+				}
+				for _, event := range events {
+					if emitErr := emitDownstream(event); emitErr != nil {
+						return emitErr
+					}
+				}
+				return nil
+			}
 			// Older hosts may still request Chat Completions output for /v1/messages.
 			// Preserve the legacy bridge in that compatibility path only.
 			if str(r.Metadata["request_path"]) == "/v1/messages" {
@@ -447,6 +464,18 @@ func (s *Service) executeStream(r ExecutorRequest) (any, error) {
 		if err == nil && nativeClaude {
 			var events [][]byte
 			events, err = claudeConverter.Done()
+			if err == nil {
+				for _, event := range events {
+					if emitErr := emitDownstream(event); emitErr != nil {
+						err = emitErr
+						break
+					}
+				}
+			}
+		}
+		if err == nil && nativeResponses {
+			var events [][]byte
+			events, err = responsesConverter.Done()
 			if err == nil {
 				for _, event := range events {
 					if emitErr := emitDownstream(event); emitErr != nil {
